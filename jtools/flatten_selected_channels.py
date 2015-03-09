@@ -21,7 +21,6 @@
 # IMPLIED WARRANTIES, INCLUDING, WITHOUT LIMITATION, THE IMPLIED
 # WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE.
 # ------------------------------------------------------------------------------
-# ------------------------------------------------------------------------------
 
 import mari
 import PySide.QtGui as QtGui
@@ -37,7 +36,7 @@ class FlattenSelectedChannelsGUI(QtGui.QDialog):
         super(FlattenSelectedChannelsGUI, self).__init__(parent)
 
         #Set window title and create a main layout
-        self.setWindowTitle("Flatten Selected Channels")
+        self.setWindowTitle("Duplicate & Flatten Selected Channels")
         main_layout = QtGui.QVBoxLayout()
         
         #Create layout for middle section
@@ -62,16 +61,12 @@ class FlattenSelectedChannelsGUI(QtGui.QDialog):
         channel_search_icon.setPixmap(search_pixmap)
         channel_header_layout.addWidget(channel_search_icon)
         channel_header_layout.addWidget(channel_filter_box)
-        
-        #Populate geo : channel list widget
-        geo_list = mari.geo.list()
-        chan_list = []
-        for geo in geo_list:
-            chan_list.append((geo.name(), geo.channelList()))
-        for item in chan_list:
-            for channel in item[1]:
-                channel_list.addItem(item[0] + ' : ' + channel.name())
-                channel_list.item(channel_list.count() - 1).setData(USER_ROLE, channel)
+ 
+        #Populate Channel List, channellist gets full channel list from project and amount of channels on current object (which sit at the top of the list)
+        channel_list= self.populateChannelList(channel_list)
+        currentObjChannels = channel_list[1]
+        channel_list = channel_list[0]
+
         
         #Add filter layout and channel list to channel layout
         channel_layout.addLayout(channel_header_layout)
@@ -104,6 +99,7 @@ class FlattenSelectedChannelsGUI(QtGui.QDialog):
         flatten_search_icon.setPixmap(search_pixmap)
         flatten_header_layout.addWidget(flatten_search_icon)
         flatten_header_layout.addWidget(flatten_filter_box)
+
         
         #Add filter layout and flatten list to flatten layout
         flatten_layout.addLayout(flatten_header_layout)
@@ -117,11 +113,14 @@ class FlattenSelectedChannelsGUI(QtGui.QDialog):
         centre_layout.addLayout(channel_layout)
         centre_layout.addLayout(middle_button_layout)
         centre_layout.addLayout(flatten_layout)
+
         
         #Create button layout and hook them up
         button_layout = QtGui.QHBoxLayout()
         ok_button = QtGui.QPushButton("&OK")
         cancel_button = QtGui.QPushButton("&Cancel")
+        displayAllObjBox = QtGui.QCheckBox('List all Objects')
+        button_layout.addWidget(displayAllObjBox)
         button_layout.addStretch()
         button_layout.addWidget(ok_button)
         button_layout.addWidget(cancel_button)
@@ -130,14 +129,65 @@ class FlattenSelectedChannelsGUI(QtGui.QDialog):
         ok_button.clicked.connect(self.accept)
         cancel_button.clicked.connect(self.reject)
         
+        #Hook up List All Object Checkbox
+        displayAllObjBox.clicked.connect(lambda: listAllObjects(channel_list,currentObjChannels,displayAllObjBox.isChecked()))
+
+        
         #Add layouts to main layout and dialog
         main_layout.addLayout(centre_layout)
         main_layout.addLayout(button_layout)
         self.setLayout(main_layout)
         
+        #calling once to cull the object list, whole thing doesn't really make for a snappy interface appearance
+        listAllObjects(channel_list,currentObjChannels,displayAllObjBox.isChecked())       
+  
+# ------------------------------------------------------------------------------
+
+    def populateChannelList(self,channel_list):
+
+        #Populate geo : channel list widget
+            geo_list = sorted(mari.geo.list(), key=lambda x: x.name())
+            chan_list = []
+            sorted_list = []
+    
+            for geo in geo_list:
+                # add geo in alphabetical sorting with all channels for each geo in alphabetical sorting, except current one which will go to the top
+                if geo is not mari.geo.current():
+                    sorted_list = sorted(geo.channelList(), key=lambda x: unicode.lower( x.name() ) )
+                    chan_list.append((geo.name(), sorted_list))
+                    
+    
+            # Push current object to the top of the list
+            currentObjName = mari.current.geo().name()
+            sorted_list = sorted(mari.geo.current().channelList(),key=lambda x: unicode.lower( x.name() ) )
+            currentChannelCount = len(sorted_list)
+            currentObj = (currentObjName,sorted_list)       
+            chan_list.insert(0,currentObj)
+    
+            for item in chan_list:
+                shaderChannelCountCheck = False
+                if item[0] is currentObjName:
+                    shaderChannelCountCheck = True
+                for channel in item[1]:
+                    shaderChannel = channel.isShaderStack()
+                    if shaderChannel and shaderChannelCountCheck:
+                        currentChannelCount -= 1     
+                    if not shaderChannel:
+                        channel_list.addItem(item[0] + ' : ' + channel.name())
+                        channel_list.item(channel_list.count() - 1).setData(USER_ROLE, channel)
+                        if channel is mari.current.channel():
+                            currentChannelRow = channel_list.count()-1
+    
+            # Set currently active channel to selected
+            channel_list.setCurrentRow(currentChannelRow)      
+            
+            return channel_list, currentChannelCount
+
+# ------------------------------------------------------------------------------
+        
     def getChannelsToFlatten(self):
         return self.flatten_list.currentChannels()
-    
+
 # ------------------------------------------------------------------------------   
 class ChannelsToFlattenList(QtGui.QListWidget):
     "Stores a list of operations to perform."
@@ -175,13 +225,33 @@ class ChannelsToFlattenList(QtGui.QListWidget):
 # ------------------------------------------------------------------------------
 def updateChannelFilter(channel_filter_box, channel_list):
     "For each item in the channel list display, set it to hidden if it doesn't match the filter text."
+    
     match_words = channel_filter_box.text().lower().split()
+   
     for item_index in range(channel_list.count()):
         item = channel_list.item(item_index)
         item_text_lower = item.text().lower()
         matches = all([word in item_text_lower for word in match_words])
         item.setHidden(not matches)
-        
+
+
+# ------------------------------------------------------------------------------
+def listAllObjects(channel_list, cur_obj_channels, showAll):
+    """For each item in the channel list display, set it to hidden if it doesn't match current Object."""
+
+    if showAll:
+        listSize = channel_list.count()
+        for index in range(cur_obj_channels,listSize):
+            item = channel_list.item(index)
+            item.setHidden(False)
+
+    else:
+        listSize = channel_list.count()
+        for index in range(cur_obj_channels,listSize):
+            item = channel_list.item(index)
+            item.setHidden(True)
+
+
 # ------------------------------------------------------------------------------
 def updateFlattenFilter(flatten_filter_box, flatten_list):
     "For each item in the flatten list display, set it to hidden if it doesn't match the filter text."
@@ -191,7 +261,7 @@ def updateFlattenFilter(flatten_filter_box, flatten_list):
         item_text_lower = item.text().lower()
         matches = all([word in item_text_lower for word in match_words])
         item.setHidden(not matches)
-
+    
 # ------------------------------------------------------------------------------
 def isProjectSuitable():
     "Checks project state."
@@ -212,7 +282,7 @@ def isProjectSuitable():
         return True
     
     else:
-        mari.utils.message("You can only run this script in Mari 2.0v1 or newer.")
+        mari.utils.message("You can only run this script in Mari 2.6v3 or newer.")
         return False
 
 # ------------------------------------------------------------------------------                  
@@ -221,6 +291,8 @@ def flattenSelectedChannels():
     if not isProjectSuitable():
         return
     
+    mari.history.startMacro('Duplicate & Flatten Channels')
+
     #Create dialog and execute accordingly
     dialog = FlattenSelectedChannelsGUI()
     if dialog.exec_():
@@ -233,8 +305,11 @@ def flattenSelectedChannels():
             flatten_channel.flatten()
             channel.setName(channel.name() + '_original')
             flatten_channel.setName(orig_name)
+
+    mari.history.stopMacro()
     
 # ------------------------------------------------------------------------------            
+  
 if __name__ == "__main__":
     flattenSelectedChannels()
 

@@ -23,6 +23,7 @@
 # ------------------------------------------------------------------------------
 # ------------------------------------------------------------------------------
 
+
 import mari, os, hashlib
 import PySide.QtGui as QtGui
 import PySide.QtCore as QtCore
@@ -39,7 +40,7 @@ class ExportSelectedChannelsUI(QtGui.QDialog):
 
         #Set window title and create a main layout
         self.bool_ = bool_
-        self.setWindowTitle("Export Selected Channels")
+        self.setWindowTitle("Export Custom Channel Selection")
         main_layout = QtGui.QVBoxLayout()
         top_group = QtGui.QGroupBox()
         middle_group = QtGui.QGroupBox()
@@ -68,16 +69,11 @@ class ExportSelectedChannelsUI(QtGui.QDialog):
         channel_header_layout.addWidget(self.channel_search_icon)
         channel_header_layout.addWidget(self.channel_filter_box)
         
-        #Populate geo : channel list widget
-        geo_list = mari.geo.list()
-        chan_list = []
-        for geo in geo_list:
-            chan_list.append((geo.name(), geo.channelList()))
-        for item in chan_list:
-            for channel in item[1]:
-                self.channel_list.addItem(item[0] + ' : ' + channel.name())
-                self.channel_list.item(self.channel_list.count() - 1).setData(USER_ROLE, channel)
-        
+        #Populate Channel List, channellist gets full channel list from project and amount of channels on current object (which sit at the top of the list)
+        self.channel_list= self.populateChannelList(self.channel_list)
+        currentObjChannels = self.channel_list[1]
+        self.channel_list = self.channel_list[0]
+    
         #Add filter layout and channel list to channel layout
         channel_layout.addLayout(channel_header_layout)
         channel_layout.addWidget(self.channel_list)
@@ -150,12 +146,19 @@ class ExportSelectedChannelsUI(QtGui.QDialog):
         #Add to top group
         top_group_layout = QtGui.QVBoxLayout()
 
+        #Add Display all Objects check box
+        displayAllObjBox = QtGui.QCheckBox('List all Objects')
+        displayAllObjBox.clicked.connect(lambda: listAllObjects(self.channel_list,currentObjChannels,displayAllObjBox.isChecked()))
+
+        
+
         #Add export everything check box
         self.export_everything_box = QtGui.QCheckBox('Export Everything')
         self.export_everything_box.clicked.connect(self._exportEverything)
 
         top_group_layout.addLayout(top_layout)
         top_group_layout.addLayout(path_layout)
+        top_group_layout.addWidget(displayAllObjBox)
         top_group_layout.addWidget(self.export_everything_box)
         top_group.setLayout(top_group_layout)
     
@@ -183,6 +186,11 @@ class ExportSelectedChannelsUI(QtGui.QDialog):
         if self.bool_:
             check_box_layout.addWidget(self.export_remove_alpha_box, 1, 2)
 
+
+        self.export_flattened_box.setChecked(True)
+        self.export_full_patch_bleed_box.setChecked(True)
+        self.export_remove_alpha_box.setChecked(False)
+
         bottom_group.setLayout(check_box_layout)
 
         #Add widget groups to main layout
@@ -201,6 +209,52 @@ class ExportSelectedChannelsUI(QtGui.QDialog):
         main_layout.addWidget(self.button_box)
         self.setLayout(main_layout)
 
+        #calling once to cull the object list, whole thing doesn't really make for a snappy interface appearance
+        listAllObjects(self.channel_list,currentObjChannels,displayAllObjBox.isChecked())     
+
+    #Generate List of Channels for the Channel List
+    def populateChannelList(self,channel_list):
+    
+           #Populate geo : channel list widget
+        geo_list = sorted(mari.geo.list(), key=lambda x: x.name())
+        chan_list = []
+        sorted_list = []
+        
+        for geo in geo_list:
+            # add geo in alphabetical sorting with all channels for each geo in alphabetical sorting, except current one which will go to the top
+            if geo is not mari.geo.current():
+                sorted_list = sorted(geo.channelList(), key=lambda x: unicode.lower( x.name() ) )
+                chan_list.append((geo.name(), sorted_list))
+                
+        
+         # Push current object to the top of the list
+        currentObjName = mari.current.geo().name()
+        sorted_list = sorted(mari.geo.current().channelList(),key=lambda x: unicode.lower( x.name() ) )
+        currentChannelCount = len(sorted_list)
+        currentObj = (currentObjName,sorted_list)       
+        chan_list.insert(0,currentObj)
+        
+        for item in chan_list:
+            shaderChannelCountCheck = False
+            if item[0] is currentObjName:
+                shaderChannelCountCheck = True
+            for channel in item[1]:
+                shaderChannel = channel.isShaderStack()
+                if shaderChannel and shaderChannelCountCheck:
+                    currentChannelCount -= 1     
+                if not shaderChannel:
+                    channel_list.addItem(item[0] + ' : ' + channel.name())
+                    channel_list.item(channel_list.count() - 1).setData(USER_ROLE, channel)
+                    if channel is mari.current.channel():
+                        currentChannelRow = channel_list.count()-1
+        
+        # Set currently active channel to selected
+        channel_list.setCurrentRow(currentChannelRow)      
+        
+        return channel_list, currentChannelCount
+
+
+    
     #Hide parts of interface if export everything is ticked
     def _exportEverything(self):
         _bool = self.export_everything_box.isChecked()
@@ -327,6 +381,24 @@ def _updateChannelFilter(channel_filter_box, channel_list):
         item_text_lower = item.text().lower()
         matches = all([word in item_text_lower for word in match_words])
         item.setHidden(not matches)
+
+# ------------------------------------------------------------------------------
+
+def listAllObjects(channel_list, cur_obj_channels, showAll):
+    """For each item in the channel list display, set it to hidden if it doesn't match current Object."""
+
+    if showAll:
+        listSize = channel_list.count()
+        for index in range(cur_obj_channels,listSize):
+            item = channel_list.item(index)
+            item.setHidden(False)
+
+    else:
+        listSize = channel_list.count()
+        for index in range(cur_obj_channels,listSize):
+            item = channel_list.item(index)
+            item.setHidden(True)
+
         
 # ------------------------------------------------------------------------------
 def _updateExportFilter(export_filter_box, export_list):
@@ -337,6 +409,7 @@ def _updateExportFilter(export_filter_box, export_list):
         item_text_lower = item.text().lower()
         matches = all([word in item_text_lower for word in match_words])
         item.setHidden(not matches)
+    
 
 # ------------------------------------------------------------------------------
 class InfoUI(QtGui.QMessageBox):
@@ -383,8 +456,8 @@ def _exportChannels(args_dict):
             for data in metadata:            
                 channel.setMetadata(*data)
                 channel.setMetadataEnabled(data[0], False)
-            channel.setMetadata('jtoolsOnlyModifiedTextures', True)
-            channel.setMetadataEnabled('jtoolsOnlyModifiedTextures', False)  
+            channel.setMetadata('OnlyModifiedTextures', True)
+            channel.setMetadataEnabled('OnlyModifiedTextures', False)  
     else:
         for channel in args_dict['channels']:
             uv_index_list = []
@@ -401,8 +474,8 @@ def _exportChannels(args_dict):
             for data in metadata:            
                 channel.setMetadata(*data)
                 channel.setMetadataEnabled(data[0], False)
-            channel.setMetadata('jtoolsOnlyModifiedTextures', True)
-            channel.setMetadataEnabled('jtoolsOnlyModifiedTextures', False)        
+            channel.setMetadata('OnlyModifiedTextures', True)
+            channel.setMetadataEnabled('OnlyModifiedTextures', False)        
     #If successful let the user know
     mari.utils.message("Export Successful")
     
@@ -438,8 +511,8 @@ def _exportEverything(args_dict):
             for data in metadata:            
                 channel.setMetadata(*data)
                 channel.setMetadataEnabled(data[0], False)
-            channel.setMetadata('jtoolsOnlyModifiedTextures', True)
-            channel.setMetadataEnabled('jtoolsOnlyModifiedTextures', False)
+            channel.setMetadata('OnlyModifiedTextures', True)
+            channel.setMetadataEnabled('OnlyModifiedTextures', False)
     else:
         for channel in channels:
             uv_index_list = []
@@ -456,8 +529,8 @@ def _exportEverything(args_dict):
             for data in metadata:            
                 channel.setMetadata(*data)
                 channel.setMetadataEnabled(data[0], False)
-            channel.setMetadata('jtoolsOnlyModifiedTextures', True)
-            channel.setMetadataEnabled('jtoolsOnlyModifiedTextures', False)
+            channel.setMetadata('OnlyModifiedTextures', True)
+            channel.setMetadataEnabled('OnlyModifiedTextures', False)
     #If successful let the user know
     mari.utils.message("Export Successful")
 
@@ -488,7 +561,7 @@ def exportSelectedChannels():
 # ------------------------------------------------------------------------------
 def _onlyModifiedTextures(channel):
     """Manage channels so only modified patch images get exported"""
-    if channel.hasMetadata('jtoolsOnlyModifiedTextures'):
+    if channel.hasMetadata('OnlyModifiedTextures'):
         uv_index_list, metadata = _getChangedUvIndexes(channel)   
     else:
         uv_index_list, metadata = _setChannelUvIndexes(channel)
@@ -611,19 +684,18 @@ def _isProjectSuitable():
             mari.utils.message("Please open a project before running.")
             return False, False
 
-        if mari.app.version().number() >= 20502300:
+        if mari.app.version().number() >= 20603300:
             return True, True
 
         return True, False
     
     else:
-        mari.utils.message("You can only run this script in Mari 2.0v1 or newer.")
+        mari.utils.message("You can only run this script in Mari 2.6v3 or newer.")
         return False, False
     
 # ------------------------------------------------------------------------------
 if __name__ == "__main__":
     exportSelectedChannels()
-
 # ------------------------------------------------------------------------------
 # Add action to Mari menu.
 action = mari.actions.create(
